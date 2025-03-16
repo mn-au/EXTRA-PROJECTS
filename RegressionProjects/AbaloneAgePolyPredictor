@@ -1,0 +1,276 @@
+# Author: Mohammad Nasser
+# Created: 17th of Sept 2024
+# Submission: Assigment 1 Part II
+
+
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+import os
+import random
+
+#class that uses polynomial regression to predict the age of Abalones 
+class AbaloneAgePolyPredictor:
+    # initialization with the data features and target var
+    def __init__(self,data,features=None,target='Rings'):
+        # copy to not modify the data
+        self.data=data.copy()  
+
+        #features and target var are chosen Rings is set to default
+        self.features=['Length', 'Diameter', 'Height', 'Whole_weight', 
+                'Shucked_weight', 'Viscera_weight', 'Shell_weight']
+        self.target=target
+        
+        # initialize coefficients,polynomial degree, mean and std values for the features(for scaling)
+        self.beta=None  
+        self.poly_degree=None 
+        self.mean=None  
+        self.std=None 
+        
+        # validates the dataset 
+        self.validate_data()
+    
+    # validates the data
+    def validate_data(self):
+
+        # check if any features are missing from the dataset
+        missing_features = [feat for feat in (self.features) if feat not in (self.data.columns)]
+
+        if missing_features:
+            raise ValueError(f"The following required features are missing from the dataset:{missing_features}")
+        
+        # check if the target variable is in the dataset
+        if self.target not in self.data.columns:
+            raise ValueError(f"The target variable '{self.target}' is missing from the dataset.")
+        
+        # check for any missing values in the columns
+        if self.data[self.features + [self.target]].isnull().any().any():
+            raise ValueError("The dataset contains missing values. Please fix this issue.")
+    
+    # helper func to print the parameters and reports if there is an error in training
+    def print_model_parameters(self):
+        #error check and printing
+        if self.beta is None:
+            print("The model has not been trained yet.")
+        else:
+            print("Model Coefficients (β):")
+            print(self.beta)
+    
+    # helper func to scale the features
+    def scale_features(self, X):
+
+        self.mean=X.mean(axis=0)
+        self.std=X.std(axis=0)
+
+        # div by 0 error
+        self.std[self.std==0]=1
+
+        #  standardized X
+        standardized_X=(X-self.mean)/self.std
+        
+        return standardized_X
+
+    # training the polynomial using OLS
+    def train_polynomial_model(self, degree=2, test_size=0.2, random_state=None):
+ 
+        # extract feature"X" && target var "y"
+        X=self.data[self.features].values
+        y=self.data[self.target].values
+
+        # scale the feature to 0 mean and unit var
+        X_scaled=self.scale_features(X)
+
+        # split into training and test set
+        X_train,X_test,y_train,y_test=self.train_test_split(X_scaled,y,test_size,random_state)
+
+        # set the degree and  generate the features for both training and testing
+        self.poly_degree=degree
+        X_train_poly=self.polynomial_features(X_train,degree) 
+        X_test_poly=self.polynomial_features(X_test,degree)    
+
+        # Compute beta using (X.T * X + lambda* I)^(-1) * X.T * y w regularization to prevent matrix issues
+
+        XTX=X_train_poly.T@X_train_poly  # X^T * X
+
+        lambda_reg=1e-5  # Small regularization parameter
+
+        I=np.eye(XTX.shape[0])  # identity matrix
+
+        # computing beta using the full formula
+        self.beta = np.linalg.inv(XTX + lambda_reg * I) @ X_train_poly.T @ y_train
+
+        # predict on the training set and give calc the mse
+        y_train_pred=X_train_poly @ self.beta  
+        train_mse=self.mean_squared_error(y_train, y_train_pred)
+
+        # predict on the testing set and give calc the mse
+        y_test_pred=X_test_poly @ self.beta 
+        test_mse=self.mean_squared_error(y_test, y_test_pred)  
+
+        # prints both the training and test MSE's
+        print(f'Training MSE: {train_mse:.4f}')
+        print(f'Test MSE: {test_mse:.4f}')
+
+        # helps to visualize the residuals for the test set to eval the modell
+        self.visualize_residuals(y_test, y_test_pred)
+
+    # splitting data into training and testing NOT DONE
+    def train_test_split(self, X, y, test_size=0.2, random_state=None):
+
+        # num of samples
+        n_samples=X.shape[0]
+        
+        #create an array of indices for each of the samples
+        indices=np.arange(n_samples)
+        
+        # set the random seed
+        if random_state is not None:
+            np.random.seed(random_state)
+        
+        # shuffle the indices to randomize the data split 
+        np.random.shuffle(indices)
+
+        # determine the size of the test set based on the "test_size"
+        test_size=int(n_samples * test_size)
+        
+        # split into test and training set respectively
+        test_indices=indices[:test_size]  
+        train_indices=indices[test_size:] 
+
+        # return the training and test splits for both features n targets
+        return X[train_indices],X[test_indices],y[train_indices],y[test_indices]
+
+    #features for the given degree to allow fast testing
+    def polynomial_features(self, X, degree):
+
+        # get the num of samples:rows  &  features:columns from X 
+        n_samples,n_features = X.shape
+            
+        # initialize the features with 1s 
+        poly_features=[np.ones(n_samples)]  
+            
+        # iterate over each degree from 1 up to the degree
+        for d in range(1, degree + 1):
+                ## iterate over each feature from 1 up to the degree
+             for i in range(n_features):
+                #append feature ^degree
+                poly_features.append(X[:, i] ** d) 
+            
+        # return the poly features as a column stack array
+        return (np.column_stack(poly_features))
+
+    #mse helper func
+    def mean_squared_error(self, y_true, y_pred):
+
+       #calc the mse and returns it
+        mse = np.mean((y_true-y_pred)**2) 
+            
+        return mse
+
+    # visulizes the feat and target variables
+    def visualize_relationships(self):
+
+
+         #sets up the size for the plot
+        plt.figure(figsize=(14,12)) 
+        for i, feature in enumerate(self.features):
+            #sub plots for each of the features
+            plt.subplot(3,3,i + 1)
+
+                # scatter-plots of feature vs target variable
+            sns.scatterplot(x=self.data[feature], y=self.data[self.target])
+
+            # title and lables for each
+            plt.title(f'{feature} vs {self.target}')
+            plt.xlabel(feature)
+            plt.ylabel(self.target)
+
+            # adjusts the layout for overlapping plotss
+        plt.tight_layout()
+        plt.show()
+
+    # helper func that helped me while looking at the residuals through a histogram 
+    def visualize_residuals(self, y_true, y_pred):
+        #calc the residuals
+        residuals = y_true - y_pred
+
+            # size for plotting
+        plt.figure(figsize=(8,6))
+
+        # plotting the histogram w a kde line
+        sns.histplot(residuals, kde=True, color='blue', bins=30)
+
+        # plots titles and labels
+        plt.title('Residuals of Predictions')
+        plt.xlabel('Residuals (Actual - Predicted)')
+        plt.ylabel('Frequency')
+        plt.show()
+
+    # final step of the guidlines where we fit the reg model over the dataset
+    def visualize_model_fit(self):
+
+        #extracts the features 'X' and target values 'y' from the data
+        X=self.data[self.features].values
+        y=self.data[self.target].values
+
+        #normalizing the feat using the mean and s.d
+        X_scaled=(X-self.mean)/self.std
+
+        #the features from the scaled data
+        X_poly=self.polynomial_features(X_scaled, self.poly_degree)
+
+        # predicting the target values using the beta coiff we found
+        y_pred=X_poly@self.beta
+
+        #plotting actual vs predicted values for each of features 
+
+        #set size for multiple sub-plots
+        plt.figure(figsize=(14,12))  
+
+        #going through the plots
+        for i, feature in enumerate(self.features):
+
+            # subplot for each of the features
+            plt.subplot(3,3,i+1)
+
+            # actual vals = blue on scatter plot and transparent green for predicted
+            sns.scatterplot(x=X[:,i],y=y,label='Actual',color='blue')
+            sns.scatterplot(x=X[:,i],y=y_pred,label='Predicted',color='green',alpha=0.6)
+
+                # title and axes labels for each plot
+            plt.title(f'{feature} vs {self.target} (Polynomial Fit Model)')
+            plt.xlabel(feature)
+            plt.ylabel(self.target)
+
+            #adjusts the layout for overlapping plotss
+        plt.tight_layout()
+        plt.show()
+
+
+def main():
+    #loads the file and checks if it exists. if it doesnt it raises an error message
+    file_path='training_data.csv' 
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"The dataset file '{file_path}' was not found.")
+    
+    abalone_data=pd.read_csv(file_path)
+
+    # an instance of the AbaloneAgePredictor class is created
+    predictor=AbaloneAgePolyPredictor(abalone_data)
+    
+    #visualize func
+    predictor.visualize_relationships()
+
+    #training the model
+    predictor.train_polynomial_model(degree=2,random_state=42)
+
+    # reports the parameters
+    predictor.print_model_parameters()
+
+    # visualizes  the fit of the model 
+    predictor.visualize_model_fit()
+
+
+if __name__ == "__main__":
+    main()
